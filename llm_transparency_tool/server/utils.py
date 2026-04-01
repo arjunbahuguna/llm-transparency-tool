@@ -13,6 +13,7 @@ import torch
 import transformers
 
 import llm_transparency_tool.routes.graph
+from llm_transparency_tool.models.mt2_model import Mt2TransparentLlm
 from llm_transparency_tool.models.tlens_model import TransformerLensTransparentLlm
 from llm_transparency_tool.models.transparent_llm import TransparentLlm
 
@@ -34,14 +35,15 @@ def possible_devices() -> List[str]:
 
 def load_dataset(filename) -> List[str]:
     with open(filename) as f:
-        dataset = [s.strip("\n") for s in f.readlines()]
+        dataset = [s.strip("\n") for s in f.readlines() if s.strip() and not s.strip().startswith("#")]
     print(f"Loaded {len(dataset)} sentences from {filename}")
     return dataset
 
 
 @st.cache_resource(
     hash_funcs={
-        TransformerLensTransparentLlm: id
+        TransformerLensTransparentLlm: id,
+        Mt2TransparentLlm: id,
     }
 )
 def load_model(
@@ -54,8 +56,18 @@ def load_model(
     """
     Returns the loaded model along with its key. The key is just a unique string which
     can be used later to identify if the model has changed.
+    For model_name "mt2", _model_path must be the path to the MT2 checkpoint (model_state_dict.pt).
     """
     assert _device in possible_devices()
+
+    if model_name == "mt2":
+        if not _model_path:
+            raise ValueError("MT2 requires a checkpoint path in config (e.g. \"mt2\": \"/path/to/model_state_dict.pt\")")
+        return Mt2TransparentLlm(
+            checkpoint_path=_model_path,
+            device=_device,
+            dtype=_dtype,
+        )
 
     causal_lm = None
     tokenizer = None
@@ -104,7 +116,8 @@ def run_model_with_session_caching(
 
 @st.cache_resource(
     hash_funcs={
-        TransformerLensTransparentLlm: id
+        TransformerLensTransparentLlm: id,
+        Mt2TransparentLlm: id,
     }
 )
 def get_contribution_graph(

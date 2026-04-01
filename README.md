@@ -56,6 +56,12 @@ yarn build
 streamlit run llm_transparency_tool/server/app.py -- config/local.json
 ```
 
+### Using the MT2 (audio) model
+
+The tool can run the MT2 audio ViT model for interpretability over music/audio. For MT2:
+
+- **Model config**: In your config JSON, add an entry under `"models"` with key `"mt2"` and value the path to the MT2 checkpoint file (e.g. `"mt2/model_state_dict.pt"` relative to the run directory). Example: `config/mt2.json`.
+- **Dataset = audio paths**: When MT2 is selected, the "Sentence" dropdown and dataset file are interpreted as **audio file paths** (one path per line). Each line of the dataset file should be a path to an audio file (e.g. WAV). The app will load that file, resample to 16 kHz, and run the transparency pipeline. If a path is missing or invalid, inference will fail; use a dataset file that lists existing audio paths.
 
 ## Adding support for your LLM
 

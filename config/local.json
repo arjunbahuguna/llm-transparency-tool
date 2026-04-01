@@ -49,7 +49,9 @@
         "facebook/opt-2.7b": null,
         "facebook/opt-6.7b": null,
         "facebook/opt-13b": null,
-        "facebook/opt-30b": null
+        "facebook/opt-30b": null,
+
+        "mt2": "mt2/model_state_dict.pt"
     },
     "default_model": "",
     "demo_mode": false

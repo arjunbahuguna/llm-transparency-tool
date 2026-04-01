@@ -175,7 +175,7 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         Streamlit.setComponentValue(curSelection)
     }
 
-    const [startToken, setStartToken] = useState<number>(nTokens - 1)
+    const [startToken, setStartToken] = useState<number>(0)
     // We have startToken state var, but it won't be updated till next render, so use
     // this var in the current render.
     var curStartToken = startToken
@@ -214,8 +214,8 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .domain([-2, nTokens - 1])
             .range([0, renderParams.cellW * (nTokens + 2)])
         const y = d3.scaleLinear()
-            .domain([-1, nLayers])
-            .range([renderParams.cellH * (nLayers + 2), 0])
+            .domain([-1, nLayers + 1.5])
+            .range([renderParams.cellH * (nLayers + 3.5), 0])
         return [x, y]
     }, [nLayers, nTokens])
 
@@ -328,7 +328,7 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             text: s.replace(/ /g, '·'),
             pos: {
                 x: xScale(i + 0.5),
-                y: yScale(-1.5),
+                y: yScale(nLayers + 1.2),
             },
         }))
     }, [tokens, xScale, yScale])
@@ -462,9 +462,9 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .attr('y', (label: Label) => label.pos.y)
             .attr('text-anchor', 'end')
             .attr('dominant-baseline', 'middle')
-            .attr('alignment-baseline', 'top')
+            .attr('alignment-baseline', 'bottom')
             .attr('transform', (label: Label) =>
-                'rotate(-40, ' + label.pos.x + ', ' + label.pos.y + ')')
+                'rotate(40, ' + label.pos.x + ', ' + label.pos.y + ')')
             .text((label: Label) => label.text)
 
         svg

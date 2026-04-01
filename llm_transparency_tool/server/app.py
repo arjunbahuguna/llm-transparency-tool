@@ -5,12 +5,16 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import networkx as nx
 import pandas as pd
 import plotly.express
+import gin
+
+gin.enter_interactive_mode()
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit_extras.row as st_row
@@ -23,6 +27,7 @@ import llm_transparency_tool.components
 from llm_transparency_tool.models.tlens_model import TransformerLensTransparentLlm
 import llm_transparency_tool.routes.contributions as contributions
 import llm_transparency_tool.routes.graph
+from llm_transparency_tool.models.mt2_model import Mt2TransparentLlm
 from llm_transparency_tool.models.transparent_llm import TransparentLlm
 from llm_transparency_tool.routes.graph_node import NodeType
 from llm_transparency_tool.server.graph_selection import (
@@ -69,7 +74,8 @@ def cached_build_paths_to_predictions(
 
 @st.cache_resource(
     hash_funcs={
-        TransformerLensTransparentLlm: id
+        TransformerLensTransparentLlm: id,
+        Mt2TransparentLlm: id,
     }
 )
 def cached_run_inference_and_populate_state(
@@ -366,6 +372,11 @@ class App:
 
         logits = self._unembed(representation)
         n_vocab = logits.shape[0]
+        
+        n_top = min(n_top, n_vocab)
+        n_bottom = max(0, min(n_bottom, n_vocab - n_top))
+        n_total = n_top + n_bottom
+
         scores, indices = torch.topk(logits, n_top, largest=True)
         positions = list(range(n_top))
 
@@ -530,11 +541,12 @@ class App:
         self.sentence = self.draw_dataset_selection()
 
         with st.sidebar.expander("Graph", expanded=True):
+            default_threshold = 0.005 if self.model_name == "mt2" else 0.04
             self._contribution_threshold = st.slider(
-                min_value=0.01,
+                min_value=0.001,
                 max_value=0.1,
-                step=0.01,
-                value=0.04,
+                step=0.001,
+                value=default_threshold,
                 format=r"%.3f",
                 label="Contribution threshold",
             )
@@ -643,6 +655,14 @@ class App:
         if self.sentence is None:
             st.warning("No sentence selected")
         else:
+            if isinstance(self._stateful_model, Mt2TransparentLlm):
+                path = self.sentence.strip()
+                if path and not os.path.isfile(path):
+                    st.warning(
+                        "MT2 expects audio file paths (one per line in the dataset). "
+                        "File not found: %s. Load a dataset file with one audio path per line."
+                        % path
+                    )
             with torch.inference_mode():
                 self.run_inference()
 

@@ -1,0 +1,4 @@
+# One audio file path per line for MT2 (WAV, 16 kHz, 4 s recommended).
+# Replace the line below with your audio file path, or add more paths.
+# /path/to/your/audio.wav
+/home/arjbah/studio_54/algoverse/llm-transparency-tool/amar.wav

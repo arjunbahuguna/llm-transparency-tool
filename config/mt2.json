@@ -1,0 +1,10 @@
+{
+    "allow_loading_dataset_files": true,
+    "preloaded_dataset_filename": "sample_audio_paths.txt",
+    "debug": false,
+    "models": {
+        "mt2": "mt2/model_state_dict.pt"
+    },
+    "default_model": "mt2",
+    "demo_mode": false
+}
