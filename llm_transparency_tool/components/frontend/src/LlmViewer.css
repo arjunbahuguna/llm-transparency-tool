@@ -13,6 +13,16 @@
     height: 100vh;
 }
 
+.graph-scroll-container {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.graph-svg {
+    display: block;
+}
+
 .svg {
     border: 1px solid #ccc;
 }

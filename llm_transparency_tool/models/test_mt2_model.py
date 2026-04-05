@@ -10,13 +10,13 @@ import os
 import tempfile
 import unittest
 
+import scipy.io.wavfile
 import torch
-import torchaudio
 
 from llm_transparency_tool.models.mt2_model import Mt2TransparentLlm
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_MT2_CKPT = os.path.join(_REPO_ROOT, "mt2", "model_state_dict.pt")
+_MT2_CKPT = os.path.join(_REPO_ROOT, "..", "mt2", "model_state_dict.pt")
 
 
 def _mt2_available():
@@ -46,14 +46,39 @@ class TestMt2TransparentLlm(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             path = f.name
         try:
-            torchaudio.save(path, wav, sr)
+            scipy.io.wavfile.write(
+                path,
+                sr,
+                (wav.squeeze(0).numpy() * 32767).astype("int16"),
+            )
             self.model.run([path])
             self.assertEqual(self.model.batch_size(), 1)
             tokens = self.model.tokens()
+            token_strings = self.model.tokens_to_strings(tokens[0])
             logits = self.model.logits()
             self.assertEqual(tokens.shape[0], 1)
             self.assertEqual(logits.shape[0], 1)
             self.assertEqual(logits.shape[2], 12)
+            self.assertEqual(token_strings[0], "CLS_STONE")
+            self.assertEqual(token_strings[1], "CLS_CONTR")
+            self.assertEqual(token_strings[2], "0.0s")
+            self.assertEqual(token_strings[-1], "4.0s")
+
+            layer = 0
+            pos = 10
+            resid_in = self.model.residual_in(layer)[0][pos]
+            resid_mid = self.model.residual_after_attn(layer)[0][pos]
+            resid_out = self.model.residual_out(layer)[0][pos]
+            attn_out = self.model.attention_output(0, layer, pos)
+            ffn_out = self.model.ffn_out(layer)[0][pos]
+            self.assertLess(
+                torch.max(torch.abs(resid_mid - (resid_in + attn_out))).item(),
+                1e-4,
+            )
+            self.assertLess(
+                torch.max(torch.abs(resid_out - (resid_mid + ffn_out))).item(),
+                1e-4,
+            )
             from llm_transparency_tool.routes.graph import build_full_graph
             graph = build_full_graph(self.model, batch_i=0, renormalizing_threshold=0.04)
             self.assertIsNotNone(graph)

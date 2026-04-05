@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -21,7 +22,6 @@ import streamlit_extras.row as st_row
 import torch
 from jaxtyping import Float
 from torch.amp import autocast
-from transformers import HfArgumentParser
 
 import llm_transparency_tool.components
 from llm_transparency_tool.models.tlens_model import TransformerLensTransparentLlm
@@ -674,8 +674,8 @@ if __name__ == "__main__":
     top_parser.add_argument("config_file")
     args = top_parser.parse_args()
 
-    parser = HfArgumentParser([LlmViewerConfig])
-    config = parser.parse_json_file(args.config_file)[0]
+    with open(args.config_file, "r", encoding="utf-8") as f:
+        config = LlmViewerConfig(**json.load(f))
 
     with SystemMonitor(config.debug) as prof:
         app = App(config)

@@ -20,14 +20,22 @@ import {
 } from './common';
 import './LlmViewer.css';
 
-export const renderParams = {
+const renderParams = {
     cellH: 32,
-    cellW: 32,
-    attnSize: 8,
-    afterFfnSize: 8,
-    ffnSize: 6,
-    tokenSelectorSize: 16,
+    minCellW: 12,
+    maxCellW: 32,
+    minAttnSize: 6,
+    maxAttnSize: 8,
+    minFfnSize: 4,
+    maxFfnSize: 6,
+    minTokenSelectorSize: 8,
+    maxTokenSelectorSize: 16,
     layerCornerRadius: 6,
+    topPad: 12,
+    leftPad: 56,
+    rightPad: 48,
+    minViewportW: 320,
+    labelSpacing: 72,
 }
 
 interface Cell {
@@ -74,8 +82,12 @@ interface Selection {
     edge: Edge | null
 }
 
-function tokenPointerPolygon(origin: Point) {
-    const r = renderParams.tokenSelectorSize / 2
+function clamp(value: number, min: number, max: number) {
+    return Math.min(Math.max(value, min), max)
+}
+
+function tokenPointerPolygon(origin: Point, size: number) {
+    const r = size / 2
     const dy = r / 2
     const dx = r * Math.sqrt(3.0) / 2
     // Draw an arrow looking down
@@ -179,7 +191,9 @@ const ContributionGraph = ({ args }: ComponentProps) => {
     // We have startToken state var, but it won't be updated till next render, so use
     // this var in the current render.
     var curStartToken = startToken
-    if (startToken >= nTokens) {
+    if (nTokens === 0) {
+        curStartToken = 0
+    } else if (startToken >= nTokens) {
         curStartToken = nTokens - 1
         setStartToken(curStartToken)
     }
@@ -209,15 +223,96 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         setStartToken(t)
     }
 
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const svgRef = useRef<SVGSVGElement | null>(null);
+    const [viewportWidth, setViewportWidth] = useState<number>(renderParams.minViewportW)
+
+    useEffect(() => {
+        const container = containerRef.current
+        if (container === null) {
+            return
+        }
+
+        const updateWidth = () => {
+            setViewportWidth(Math.max(container.clientWidth, renderParams.minViewportW))
+        }
+
+        updateWidth()
+
+        const observer = new ResizeObserver(() => {
+            updateWidth()
+        })
+        observer.observe(container)
+
+        return () => {
+            observer.disconnect()
+        }
+    }, [])
+
+    const geometry = useMemo(() => {
+        const tokenSlots = Math.max(nTokens, 1)
+        const usableWidth = Math.max(
+            viewportWidth - renderParams.leftPad - renderParams.rightPad,
+            renderParams.minCellW * tokenSlots,
+        )
+        const cellW = clamp(
+            Math.floor(usableWidth / tokenSlots),
+            renderParams.minCellW,
+            renderParams.maxCellW,
+        )
+        const totalW = renderParams.leftPad + renderParams.rightPad + cellW * tokenSlots
+        return {
+            cellH: renderParams.cellH,
+            cellW,
+            attnSize: clamp(cellW * 0.45, renderParams.minAttnSize, renderParams.maxAttnSize),
+            ffnSize: clamp(cellW * 0.3, renderParams.minFfnSize, renderParams.maxFfnSize),
+            tokenSelectorSize: clamp(
+                cellW * 0.7,
+                renderParams.minTokenSelectorSize,
+                renderParams.maxTokenSelectorSize,
+            ),
+            leftPad: renderParams.leftPad,
+            rightPad: renderParams.rightPad,
+            totalW,
+        }
+    }, [nTokens, viewportWidth])
+
+    const isAudioTimeline = useMemo(() => {
+        if (modelInfo?.name === 'mt2') {
+            return true
+        }
+        if (!tokens || tokens.length <= 2) {
+            return false
+        }
+        return false
+    }, [modelInfo, tokens])
+
+    const tokenLabelStep = useMemo(() => {
+        if (isAudioTimeline) {
+            return Math.max(1, Math.ceil(renderParams.labelSpacing / geometry.cellW))
+        }
+
+        const maxLabelCount = Math.max(
+            1,
+            Math.floor(
+                Math.max(viewportWidth - geometry.leftPad, renderParams.labelSpacing) /
+                renderParams.labelSpacing,
+            ),
+        )
+
+        return Math.max(1, Math.ceil(Math.max(nTokens, 1) / maxLabelCount))
+    }, [geometry.cellW, geometry.leftPad, isAudioTimeline, nTokens, viewportWidth])
+
     const [xScale, yScale] = useMemo(() => {
+        const tokenSlots = Math.max(nTokens, 1)
         const x = d3.scaleLinear()
-            .domain([-2, nTokens - 1])
-            .range([0, renderParams.cellW * (nTokens + 2)])
+            .domain([0, tokenSlots])
+            .range([geometry.leftPad, geometry.leftPad + geometry.cellW * tokenSlots])
         const y = d3.scaleLinear()
             .domain([-1, nLayers + 1.5])
-            .range([renderParams.cellH * (nLayers + 3.5), 0])
+            .range([geometry.cellH * (nLayers + 3.5) + renderParams.topPad, renderParams.topPad])
         return [x, y]
-    }, [nLayers, nTokens])
+    }, [geometry.cellH, geometry.cellW, geometry.leftPad, nLayers, nTokens])
 
     const cells = useMemo(() => {
         let result: Cell[] = []
@@ -234,8 +329,8 @@ const ContributionGraph = ({ args }: ComponentProps) => {
 
     const nodeCoords = useMemo(() => {
         let result = new Map<string, Point>()
-        const w = renderParams.cellW
-        const h = renderParams.cellH
+        const w = geometry.cellW
+        const h = geometry.cellH
         for (var cell of cells) {
             const cx = xScale(cell.token + 0.5)
             const cy = yScale(cell.layer - 0.5)
@@ -265,7 +360,7 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             )
         }
         return result
-    }, [cells, nTokens, xScale, yScale])
+    }, [cells, geometry.cellH, geometry.cellW, nTokens, xScale, yScale])
 
     const edges: Edge[][] = useMemo(() => {
         let result = []
@@ -297,16 +392,18 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         return result
     }, [edgesRaw, nodeCoords])
 
+    const currentEdges = useMemo(() => edges[curStartToken] ?? [], [curStartToken, edges])
+
     const activeNodes = useMemo(() => {
         let result = new Set<string>()
-        for (var edge of edges[curStartToken]) {
+        for (var edge of currentEdges) {
             const u = JSON.stringify(edge.from)
             const v = JSON.stringify(edge.to)
             result.add(u)
             result.add(v)
         }
         return result
-    }, [edges, curStartToken])
+    }, [currentEdges])
 
     const nodeProps = useMemo(() => {
         let result: Array<NodeProps> = []
@@ -324,14 +421,46 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         if (!tokens) {
             return []
         }
-        return tokens.map((s: string, i: number) => ({
-            text: s.replace(/ /g, '·'),
-            pos: {
-                x: xScale(i + 0.5),
-                y: yScale(nLayers + 1.2),
-            },
-        }))
-    }, [tokens, xScale, yScale])
+        return tokens.flatMap((s: string, i: number) => {
+            if (isAudioTimeline) {
+                if (i < 2) {
+                    return []
+                }
+                const audioTokenIndex = i - 2
+                const shouldShow = (
+                    audioTokenIndex % tokenLabelStep === 0 ||
+                    i === nTokens - 1
+                )
+                if (!shouldShow) {
+                    return []
+                }
+                return [{
+                    text: s.replace(/ /g, '·'),
+                    pos: {
+                        x: xScale(i + 0.5),
+                        y: yScale(-2.25),
+                    },
+                }]
+            }
+
+            const isSpecialToken = i < 2 || i === nTokens - 1
+            const shouldShow = isSpecialToken || (
+                i % tokenLabelStep === 0
+            )
+            if (!shouldShow) {
+                return []
+            }
+            return [{
+                text: s.replace(/ /g, '·'),
+                pos: {
+                    x: xScale(i + 0.5),
+                    y: yScale(nLayers + 1.2),
+                },
+            }]
+        })
+    }, [isAudioTimeline, nLayers, nTokens, tokenLabelStep, tokens, xScale, yScale])
+
+    const audioAxisY = useMemo(() => yScale(-1.65), [yScale])
 
     const layerLabels: Label[] = useMemo(() => {
         return Array.from(Array(nLayers).keys()).map(i => ({
@@ -353,11 +482,13 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         ]))
     }, [nTokens, nLayers, xScale, yScale])
 
-    const totalW = xScale(nTokens + 2)
+    const totalW = geometry.totalW
     const totalH = yScale(-4)
+    const needsHorizontalScroll = totalW > viewportWidth
+
     useEffect(() => {
-        Streamlit.setFrameHeight(totalH)
-    }, [totalH])
+        Streamlit.setFrameHeight(totalH + (needsHorizontalScroll ? 20 : 0))
+    }, [needsHorizontalScroll, totalH])
 
     const colorScale = d3.scaleLinear(
         [0.0, 0.5, 1.0],
@@ -368,8 +499,6 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         ['orchid', 'purple', 'purple']
     )
     const edgeWidthScale = d3.scaleLinear([0.0, 0.5, 1.0], [2.0, 3.0, 3.0])
-
-    const svgRef = useRef(null);
 
     useEffect(() => {
         const getNodeStyle = (p: NodeProps, type: string) => {
@@ -391,15 +520,15 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .enter()
             .append('rect')
             .attr('class', 'layer-highlight')
-            .attr('x', xScale(-1.0))
+            .attr('x', geometry.leftPad - geometry.cellW * 0.75)
             .attr('y', (layer) => yScale(layer))
-            .attr('width', xScale(nTokens + 0.25) - xScale(-1.0))
+            .attr('width', Math.max(nTokens, 1) * geometry.cellW + geometry.cellW * 0.5)
             .attr('height', (layer) => yScale(layer) - yScale(layer + 1))
             .attr('rx', renderParams.layerCornerRadius)
 
         svg
             .selectAll('edges')
-            .data(edges[curStartToken])
+            .data(currentEdges)
             .enter()
             .append('line')
             .style('stroke', (edge: Edge) => {
@@ -433,7 +562,7 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .attr('class', (p) => getNodeStyle(p, 'residual'))
             .attr('cx', (p) => p.pos.x)
             .attr('cy', (p) => p.pos.y)
-            .attr('r', renderParams.attnSize / 2)
+            .attr('r', geometry.attnSize / 2)
             .on('click', (event: PointerEvent, p) => {
                 handleRepresentationClick(p.node)
             })
@@ -445,10 +574,10 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .filter((p) => p.node.item === CellItem.Ffn && p.isActive)
             .append('rect')
             .attr('class', (p) => getNodeStyle(p, 'ffn'))
-            .attr('x', (p) => p.pos.x - renderParams.ffnSize / 2)
-            .attr('y', (p) => p.pos.y - renderParams.ffnSize / 2)
-            .attr('width', renderParams.ffnSize)
-            .attr('height', renderParams.ffnSize)
+            .attr('x', (p) => p.pos.x - geometry.ffnSize / 2)
+            .attr('y', (p) => p.pos.y - geometry.ffnSize / 2)
+            .attr('width', geometry.ffnSize)
+            .attr('height', geometry.ffnSize)
             .on('click', (event: PointerEvent, p) => {
                 handleRepresentationClick(p.node)
             })
@@ -460,12 +589,39 @@ const ContributionGraph = ({ args }: ComponentProps) => {
             .append('text')
             .attr('x', (label: Label) => label.pos.x)
             .attr('y', (label: Label) => label.pos.y)
-            .attr('text-anchor', 'end')
-            .attr('dominant-baseline', 'middle')
-            .attr('alignment-baseline', 'bottom')
-            .attr('transform', (label: Label) =>
-                'rotate(40, ' + label.pos.x + ', ' + label.pos.y + ')')
+            .attr('text-anchor', isAudioTimeline ? 'middle' : 'end')
+            .attr('dominant-baseline', isAudioTimeline ? 'hanging' : 'middle')
+            .attr('alignment-baseline', isAudioTimeline ? 'hanging' : 'bottom')
+            .attr('transform', (label: Label) => (
+                isAudioTimeline
+                    ? null
+                    : 'rotate(40, ' + label.pos.x + ', ' + label.pos.y + ')'
+            ))
+            .attr('font-size', isAudioTimeline ? 11 : 14)
             .text((label: Label) => label.text)
+
+        if (isAudioTimeline) {
+            svg
+                .append('line')
+                .attr('x1', xScale(0))
+                .attr('x2', xScale(Math.max(nTokens, 1)))
+                .attr('y1', audioAxisY)
+                .attr('y2', audioAxisY)
+                .attr('stroke', '#b8c2cc')
+                .attr('stroke-width', 1)
+
+            svg
+                .selectAll('audio_axis_ticks')
+                .data(tokenLabels)
+                .enter()
+                .append('line')
+                .attr('x1', (label: Label) => label.pos.x)
+                .attr('x2', (label: Label) => label.pos.x)
+                .attr('y1', audioAxisY)
+                .attr('y2', audioAxisY + 6)
+                .attr('stroke', '#b8c2cc')
+                .attr('stroke-width', 1)
+        }
 
         svg
             .selectAll('layer_labels')
@@ -488,14 +644,19 @@ const ContributionGraph = ({ args }: ComponentProps) => {
                     ? 'selectable-item selection'
                     : 'selectable-item token-selector'
             ))
-            .attr('points', ([, p]) => tokenPointerPolygon(p))
-            .attr('r', renderParams.tokenSelectorSize / 2)
+            .attr('points', ([, p]) => tokenPointerPolygon(p, geometry.tokenSelectorSize))
+            .attr('r', geometry.tokenSelectorSize / 2)
             .on('click', (event: PointerEvent, [i,]) => {
                 handleTokenClick(i)
             })
     }, [
         cells,
-        edges,
+        currentEdges,
+        geometry.attnSize,
+        geometry.cellW,
+        geometry.ffnSize,
+        geometry.leftPad,
+        geometry.tokenSelectorSize,
         nodeProps,
         tokenLabels,
         layerLabels,
@@ -505,13 +666,22 @@ const ContributionGraph = ({ args }: ComponentProps) => {
         colorScale,
         ffnEdgeColorScale,
         edgeWidthScale,
+        audioAxisY,
+        isAudioTimeline,
         nLayers,
         nTokens,
         xScale,
         yScale
     ])
 
-    return <svg ref={svgRef} width={totalW} height={totalH}></svg>
+    return (
+        <div
+            ref={containerRef}
+            className="graph-scroll-container"
+        >
+            <svg ref={svgRef} className="graph-svg" width={totalW} height={totalH}></svg>
+        </div>
+    )
 }
 
 export default withStreamlitConnection(ContributionGraph)
